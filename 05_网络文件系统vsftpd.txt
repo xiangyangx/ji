@@ -1,0 +1,281 @@
+网络文件系统之三， FTP
+
+FTP指的是一种协议（文件传输协议），而vsftpd是Linux下一种ftp服务器软件。还有其他的一些ftp软件，比如tftp,proftpd,pure-ftpd等等。
+FTP是一个跨平台的文件共享服务， 在windows , Linux, macOS都有服务器端和客户端软件的支持。
+
+vsftpd的应用
+
+装：
+[root@geust02 ~]# rpm   -qa  |grep   vsftpd
+
+[root@geust02 ~]# yum install  -y  vsftpd
+
+配：
+
+vsftpd 默认配置即是一个匿名的只读共享。
+
+启：
+[root@geust02 ~]# systemctl   start  vsftpd
+[root@geust02 ~]# ss  -ntupl  |grep  vsftpd
+tcp    LISTEN     0      32       :::21                   :::*                   users:(("vsftpd",pid=2781,fd=3))
+
+特别说明：
+FTP， 用ss命令看到的端口只是ftp的命令端口，而当ftp传输数据的时候，它会打开新的端口进行数据传输。
+FTP的数据传输分为主动模式和被动模式。
+
+FTP监听的21端口只是FTP命令端口，用于用户登录，执行命令等操作。而FTP服务器和客户端进行数据传输（下载或上传）是通过数据端口来完成。
+在主动模式下：FTP会采用20号端口传输数据；
+在被动模式下：FTP会采用大于1024的随机端口传输数据。
+FTP传输数据采用主动模式还是被动模式是由FTP的客户端来决定。
+
+测：
+客户端的访问：
+windows ,linux,或其他平台的文件浏览器中输入，ftp://192.168.122.109
+Linux命令行中，使用ftp IP地址 命令，用户ftp 或 anonymous代表匿名登录
+在浏览器中也同样可以访问
+
+[root@365linux ~]# ftp  192.168.122.109
+Connected to 192.168.122.109 (192.168.122.109).
+220 (vsFTPd 3.0.2)
+Name (192.168.122.109:root): ftp
+331 Please specify the password.
+Password:
+230 Login successful.
+Remote system type is UNIX.
+Using binary mode to transfer files.
+ftp> ls
+227 Entering Passive Mode (192,168,122,109,154,218).
+150 Here comes the directory listing.
+drwxr-xr-x    2 0        0               6 Aug 03  2015 pub
+226 Directory send OK.
+
+
+默认情况下，匿名用户访问的共享目录是/var/ftp/
+
+[root@vhost01 ~]# ls /var/ftp/
+pub
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+vsftpd的应用实例 1 ： 更改匿名访问的默认目录
+
+[root@geust02 ~]# vim /etc/vsftpd/vsftpd.conf
+在最后添加：
+anon_root=/share/ftp
+
+[root@geust02 ~]# mkdir   -p   /share/ftp
+[root@geust02 ~]# echo  "hello ftp"  >  /share/ftp/test.txt
+
+[root@geust02 ~]# systemctl    restart   vsftpd
+
+测试略。
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+vsftpd的应用实例 2： FTP匿名用户上传文件
+
+默认情况下， vsftpd不允许在它共享根目录（/share/ftp）下上传文件, 只允许在/share/ftp/下创建一个子目录来进行上传。
+
+找到配置文件中的
+anon_upload_enable=YES
+去掉#注释。
+
+[root@geust02 vsftpd]# mkdir   /share/ftp/upload
+[root@geust02 vsftpd]# chmod   777  /share/ftp/upload
+[root@geust02 vsftpd]# systemctl   restart  vsftpd
+
+测试略
+
+上传的文件的用户和权限如下：
+[root@geust02 vsftpd]# ll  /share/ftp/upload/
+总用量 228
+-rw------- 1 ftp ftp 231643 12月 12 15:32 Screenshot_01-rhel7.2_2016-11-29_14:28:51.png
+
+上传过程中，发现上传目录和删除上传的文件都是失败的，而上传文件是成功的。
+自己上传的文件，自己下载不了。
+
+
+匿名用户上传目录
+anon_mkdir_write_enable=YES  （上传目录权限）
+
+anon_other_write_enable＝YES  （修改，删除，重命名文件的权限）
+
+
+ 匿名不能下载自己上传的文件
+原因是：
+anon_world_readable_only＝YES （默认情况下，匿名用户只能够下载全世界（所有人）可读的文件，而匿名用户上传上去的文件，生成的权限默认是600，所以不能下载）
+
+解决的方法：
+anon_world_readable_only＝NO
+或者
+anon_umask＝022（默认是077）
+
+不能对vsftpd匿名共享根目录/share/ftp的权限设为777 ，否则ftp访问不了。测试如下：
+[root@365linux ~]# ftp  192.168.122.109
+Connected to 192.168.122.109 (192.168.122.109).
+220 (vsFTPd 3.0.2)
+Name (192.168.122.109:root): ftp
+331 Please specify the password.
+Password:
+500 OOPS: vsftpd: refusing to run with writable root inside chroot()
+Login failed.
+
+扩展思考：如果非要对ftp的根目录上传文件，怎么做？
+
+通过上面的配置和测试，发现vsftpd匿名用户要上传文件和目录有很多限制，需要一步步开放权限。
+基本原则就是服务本身开发可写的同时，要开发上传文件夹的权限。
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+vsftpd应用实例3： 本地用户验证登录
+
+默认情况下，vsftpd使用的是pam（可热插拔的用户认证系统）的方式进行用户认证，而目前Linux系统本地用户登录采用的也pam管理。
+即vsftpd和login是同一套用户体系（/etc/passwd /etc/shadow）
+
+直接用服务器端系统已存在的普通用户帐号进行登录vsftpd即可。
+[root@geust02 vsftpd]# useradd   liubei
+[root@geust02 vsftpd]# passwd   liubei
+
+[root@365linux ~]# ftp  192.168.122.109
+Connected to 192.168.122.109 (192.168.122.109).
+220 (vsFTPd 3.0.2)
+Name (192.168.122.109:root): liubei
+331 Please specify the password.
+Password:
+230 Login successful.
+Remote system type is UNIX.
+Using binary mode to transfer files.
+ftp> pwd
+257 "/home/liubei"
+ftp> help 
+
+默认本地用户登录到自己的家目录，可以进行上传下载的操作都可以。 
+
+PS : 默认情况下，本地用户可以登录ＦＴＰ后，可以切换到别的系统目录去。这样很不安全。
+ftp> cd   /etc/
+250 Directory successfully changed.
+ftp> ls
+
+限制方法：
+chroot_local_user=YES　限制所有用户
+
+或者：
+以下是限制部分用户，在chroot_list
+chroot_list_enable=YES
+chroot_list_file=/etc/vsftpd/chroot_list （在这个列表文件中写上要限制的用户名）
+
+但是， 当你把用户限制在自己家目录时，对本地用户而言，家目录/home/liubei即是它的ftp的根目录，而本地用户对自己的家目录是可写的，那么和ftp的默认安全策略（不允许用户对ftp的根目录可写）相冲突，导致ftp无法登录。
+
+如何解决：
+1. 让本地的ftp根目录不可写（但是认用户的家目录都不可写，不符合实际需求。）
+改变ftp的本地用户根目录到另外一个只读目录。
+
+local_root=/var/srv
+
+[root@geust02 vsftpd]# mkdir  /var/srv
+[root@geust02 vsftpd]# touch   /var/srv/ftpchroot.txt
+
+
+[root@365linux ~]# ftp  192.168.122.109
+Connected to 192.168.122.109 (192.168.122.109).
+220 (vsFTPd 3.0.2)
+Name (192.168.122.109:root): liubei
+331 Please specify the password.
+Password:
+230 Login successful.
+Remote system type is UNIX.
+Using binary mode to transfer files.
+ftp> ls
+227 Entering Passive Mode (192,168,122,109,183,136).
+150 Here comes the directory listing.
+-rw-r--r--    1 0        0               0 Dec 12 08:09 ftpchroot.txt
+226 Directory send OK.
+ftp> pwd
+257 "/"
+ftp> cd  /etc/
+550 Failed to change directory.
+
+可以看到，本地用户被限制在了自己的家目录。 有一个新的问题，local_root=/var/srv 对所有用户生效。 默认情况每个用户去到自己的家目录（/home下不同的目录），现在每个用户都是登录到/var/srv 。 
+
+思考： 如果我要做，用户被限制在自己的家目录，同时每个用户登录后去到不同的目录，怎么做？
+
+2. 让ftp支持根目录可写（思考）
+allow_writeable_chroot=YES
+
+
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+vsftpd应用实例3：  vsftpd对于本地用户黑白名单限制
+
+在默认情况下，ftp允许所有的系统本地用户登录。如果有所限制，使用以下的两个文件（主要是user_list）。
+
+[root@geust02 vsftpd]# pwd
+/etc/vsftpd
+
+[root@geust02  vsftpd]# ls
+ftpusers  user_list
+
+user_list既可以作为白名单，也可以做为黑名单，取决于主配置文件中的userlist_deny的选项。
+默认情况下，主配置文件中，
+userlist_deny=YES
+那么，在usre_list文件中用户将不能访问ftp，即黑名单。
+
+如果userlist_deny=NO
+那么，在usre_list文件中用户将可以访问ftp，即白名单。
+
+同时还检查用户名是否在ftpusers文件中，主要放了一系统服务的用户，这个文件中的用户永远都不能访问ftp，不管user_list是白还是黑。
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+vsftpd应用实例5： FTP托管模式
+
+如果vsftpd的服务不是一个频繁使用的服务，没有必要长期运行在系统中，占用系统资源，使用投管模式，有访问的时候才启动。 
+在Linux系统使用xinetd服务托管其他服务，而xinetd有很多的安全配置选项，使用得服务更安全。
+
+对于xinetd服务
+
+装：
+[root@geust02 vsftpd]# rpm  -qa  |grep xinetd
+[root@geust02 vsftpd]# yum install -y  xinetd
+
+配置：
+[root@geust02 ~]# systemctl   stop vsftpd
+[root@geust02 ~]# systemctl   disable  vsftpd
+
+[root@geust02 ~]# vim /etc/vsftpd/vsftpd.conf
+listen=NO
+listen_ipv6=NO
+
+[root@geust02 ~]# vim  /etc/xinetd.d/vsftpd
+service ftp
+              {
+                     disable             = no
+                     socket_type         = stream
+                     wait                = no
+                     nice                = 10
+                     user                = root
+                     server              = /usr/sbin/vsftpd
+                     server_args         = /etc/vsftpd/vsftpd.conf
+               }
+
+启：
+[root@geust02 ~]# systemctl restart  xinetd
+
+[root@geust02 ~]# ss  -ntupl |grep  xinetd 
+tcp    LISTEN     0      64       :::21                   :::*                   users:(("xinetd",pid=3232,fd=5))
+
+
+测：略
+
+用xinetd来托管服务的好处是，可以利用xinetd守护进程的特性，访问控制，流量限制，日志增强，应用防火墙等等。还可以节省系统开销。对于访问量不大不频繁的ftp服务器，可以使用托管模式。
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+练习：
+１.  匿名用户可以上传，删除，下载，改名文件和目录。
+２.　改变匿名用户登录的默认目录;
+3.　 实现将本地用户登录后限制在自己的家目录（在/home/username）
+4.   改变本地用户登录的默认目录，所有用户登录后到同一目录（非家目录）。　（可选作业：如果不同的用户登录到不同的目录（非家目录），怎么做。提示：使用用户子配置文件。
+5.  设置ftp独占模式下（非托管），下载客户端连接数量（最多支持2个客户端连接），传输速度的控制（下载速度限制在20K/S）。
+6.  配置ftp使用xinetd的托管默认实现只在规定的时间（15：00－17：00）可以使用ftp的服务。
+7. 了解vsftpd的虚拟用户用法和设置（不做要求）。
+
+所有人必须要做的练习 1  ， 2 ， 3， 4. 6
+

@@ -1,0 +1,281 @@
+网络文件系统  (NAS  网络附加存储， 还有DAS和SAN的类型)
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+网络文件系统之一  NFS
+
+NFS：主要用在LINUX和LINUX系统之间提供共享存储。
+
+服务的配置和应用过程： 装    配     启     测
+
+装： 安装
+配： 配置
+启： 启动
+测： 测试
+
+1.NFS的安装
+
+首先检查rpcbind和nfs-utils有没有安装，没有就装上。
+
+[root@geust02 ~]# rpm   -qa  |grep  rpcbind
+
+[root@geust02 ~]# rpm   -qa  |grep  nfs-utils
+
+[root@geust02 ~]# yum  install  -y  rpcbind   nfs-utils
+
+rpcbind  ：  端口管理（nfs提供服务时，使用了一些随机端口，客户端在连接时，先要向rpcbind询问nfs的工作端口）
+nfs-utils :  nfs的配置工具（nfs提供文件共享的功能是在内核当中实现）
+
+nfs的共享功能是Linux内核默认就提供。
+
+2. NFS配置共享某个目录
+
+[root@geust02 ~]# vim   /etc/exports
+/public     *(ro)
+
+[root@geust02 ~]# mkdir   /public
+[root@geust02 ~]# cp   /etc/man_db.conf   /public/
+
+3. NFS的启动
+[root@geust02 ~]# systemctl    start   rpcbind
+[root@geust02 ~]# systemctl    enable   rpcbind
+
+[root@geust02 ~]# systemctl   start  nfs-server
+[root@geust02 ~]# systemctl   enable  nfs-server
+
+[root@geust02 ~]# ss  -4ntulp  |grep   rpcbind
+udp    UNCONN     0      0         *:886                   *:*                   users:(("rpcbind",pid=1135,fd=7))
+udp    UNCONN     0      0         *:111                   *:*                   users:(("rpcbind",pid=1135,fd=6))
+tcp    LISTEN     0      128       *:111                   *:*                   users:(("rpcbind",pid=1135,fd=8))
+
+
+[root@geust02 ~]# rpcinfo   -p
+   program vers proto   port  service
+    100000    4   tcp    111  portmapper
+    100000    3   tcp    111  portmapper
+    100000    2   tcp    111  portmapper
+    100000    4   udp    111  portmapper
+    100000    3   udp    111  portmapper
+    100000    2   udp    111  portmapper
+    100024    1   udp  36853  status
+    100024    1   tcp  57080  status
+    100005    1   udp  20048  mountd
+    100005    1   tcp  20048  mountd
+    100005    2   udp  20048  mountd
+    100005    2   tcp  20048  mountd
+    100005    3   udp  20048  mountd
+    100005    3   tcp  20048  mountd
+    100003    3   tcp   2049  nfs
+    100003    4   tcp   2049  nfs
+    100227    3   tcp   2049  nfs_acl
+    100003    3   udp   2049  nfs
+    100003    4   udp   2049  nfs
+    100227    3   udp   2049  nfs_acl
+    100021    1   udp  55271  nlockmgr
+    100021    3   udp  55271  nlockmgr
+    100021    4   udp  55271  nlockmgr
+    100021    1   tcp  34997  nlockmgr
+    100021    3   tcp  34997  nlockmgr
+    100021    4   tcp  34997  nlockmgr
+
+启动NFS时要首先启动rpcbind。NFS启动时将自己的随机端口向rpcbind进行注册。
+
+4. 客户端测试
+
+[root@365linux ~]# showmount  -e     192.168.122.109
+Export list for 192.168.122.109:
+/public *
+
+
+[root@365linux ~]# mount   192.168.122.109:/public     /mnt
+
+[root@365linux ~]# ls  /mnt/
+man_db.conf
+
+[root@365linux ~]# touch   /mnt/write.test
+touch: 无法创建"/mnt/write.test": 只读文件系统
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+NFS的应用实例1： 配置可支持读写的共享
+
+/public     *(rw,sync)
+NFS支持写入
+
+[root@geust02 ~]# exportfs    -av
+exporting *:/public
+使配置生效
+
+客户端测试：
+[root@365linux ~]# umount   /mnt
+[root@365linux ~]# mount   192.168.122.109:/public     /mnt
+
+[root@365linux ~]# ls  /mnt/
+man_db.conf
+[root@365linux ~]# touch   /mnt/write.test
+touch: 无法创建"/mnt/write.test": 权限不够
+
+为什么？
+
+[root@geust02 ~]# chmod   777  /public/
+[root@365linux ~]# touch   /mnt/write.test
+
+客户端
+[root@365linux ~]# ll   /mnt/write.test
+-rw-r--r-- 1 nfsnobody nfsnobody 0 12月 12 10:17 /mnt/write.test
+
+服务器端
+[root@geust02 ~]# ll /public/
+总用量 8
+-rw-r--r-- 1 root      root      5171 12月 12 09:49 man_db.conf
+-rw-r--r-- 1 nfsnobody nfsnobody    0 12月 12 10:17 write.test
+
+回答为什么？
+1. 实现NFS共享文件夹可写，必须要满足nfs支持rw的选项以及共享的文件夹/public有写入权限（nfs可写和文件夹可写同时成立）。
+2. 默认情况下， 客户端root的权限被映射成为匿名用户nfsnobody.
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+NFS的应用实例2：  NFS客户端和服务器端的用户映射
+
+NFS客户端没有用户登录的机制
+
+2.1 普通用户的映射问题
+
+客户端：
+[demo@365linux ~]$ touch    /mnt/demo.txt
+[demo@365linux ~]$ ll  /mnt/demo.txt
+-rw-rw-r-- 1 demo demo 0 12月 12 10:24 /mnt/demo.txt
+
+服务器：
+[root@geust02 ~]# ll  /public/demo.txt
+-rw-rw-r-- 1 demo demo 0 12月 12 10:24 /public/demo.txt
+
+客户端：
+[root@365linux ~]# su   -  lisi
+[lisi@365linux ~]$ touch   /mnt/lisi.txt
+[lisi@365linux ~]$ ll /mnt/lisi.txt
+-rw-rw-r-- 1 lisi lisi 0 12月 12 10:27 /mnt/lisi.txt
+
+服务器端：
+[root@geust02 ~]# ll  /public/lisi.txt
+-rw-rw-r-- 1 zhangsan zhangsan 0 12月 12 10:27 /public/lisi.txt
+
+
+客户端：
+[root@365linux ~]# id  demo
+uid=1000(demo) gid=1000(demo) 组=1000(demo)
+[root@365linux ~]# id  lisi
+uid=1001(lisi) gid=1001(lisi) 组=1001(lisi)
+
+服务器：
+[root@geust02 ~]# id  demo
+uid=1000(demo) gid=1000(demo) 组=1000(demo)
+[root@geust02 ~]# id  zhangsan
+uid=1001(zhangsan) gid=1001(zhangsan) 组=1001(zhangsan)
+
+
+客户端：
+[root@365linux ~]# id  wangwu
+uid=3000(wangwu) gid=3000(wangwu) 组=3000(wangwu)
+[root@365linux ~]# su  - wangwu
+[wangwu@365linux ~]$ touch   /mnt/wangwu.txt
+[wangwu@365linux ~]$ ll  /mnt/wangwu.txt
+-rw-rw-r-- 1 wangwu wangwu 0 12月 12 10:30 /mnt/wangwu.txt
+
+服务器端：
+[root@geust02 ~]# ll  /public/wangwu.txt
+-rw-rw-r-- 1 3000 3000 0 12月 12 10:30 /public/wangwu.txt
+
+结论：
+1. NFS默认保留普通用户的文件拥有者的身份，但是，LInux系统对于用户的识别是通过UID来完成的，有可能造成，在客户端和服务器，同一个UID对应的用户名不一样。比如在客户端1001对应的lisi用户，而在服务端对应是zhangsan用户。要注意这点。
+2. 而管理员root默认会被映射为nfsnobody，可以通过配置，使普通用户映射成某个匿名用户，也可以取消root用户的匿名映射。
+
+示例：
+/public          *(rw,sync,no_root_squash)  //不把root映射为nfsnobody
+/public          *(rw,sync,all_squash,anonuid=1000,anongid=1000) //所有人都映射为匿名用户（包括root），匿名用户设置为UID＝1000的那个用户
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+NFS的应用实例3： NFS客户端访问控制
+
+NFS通过主机名或IP地址对客户端进行访问控制。
+
+示例：
+       /               master(rw) trusty(rw,no_root_squash)
+       /projects       proj*.local.domain(rw)
+       /usr            *.local.domain(ro) @trusted(rw)
+       /home/joe       pc001(rw,all_squash,anonuid=150,anongid=100)
+       /pub            *(ro,insecure,all_squash)
+       /srv/www        -sync,rw server @trusted @external(ro)
+       /foo            2001:db8:9:e54::/64(rw) 192.0.2.0/24(rw)
+       /build          buildhost[0-9].local.domain(rw)
+
+NFS主要用在局域网内，提供服务器的后端数据存储，对于连接限制应该在物理连接上隔离。所以nfs服务本身的对主机名或IP的访问控制应用的意义不大。
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+NFS的应用实例4： NFS客户端自动挂载
+
+实现方式1： fstab
+[root@365linux ~]# vim /etc/fstab
+ 192.168.122.109:/public    /mnt                nfs       defaults     0 0
+
+[root@365linux ~]# umount /mnt
+[root@365linux ~]# mount   -a
+[root@365linux ~]# mount  |grep  nfs
+
+192.168.122.109:/public on /mnt type nfs4 (rw,relatime,vers=4.0,rsize=131072,wsize=131072,namlen=255,hard,proto=tcp,port=0,timeo=600,retrans=2,sec=sys,clientaddr=192.168.122.1,local_lock=none,addr=192.168.122.109)
+
+实现方式2： autofs （推荐）
+
+装：
+[root@365linux ~]# rpm   -qa  |grep  autofs
+autofs-5.0.7-54.el7.x86_64
+
+配： 默认配置即可使用
+启：
+[root@365linux ~]# systemctl   start  autofs
+
+autofs实现了，当你去访问服务器的共享时，会自动把服务共享文件夹挂载到本地的/net/IP/共享文件夹。当你长时间不访问，它就自动卸载。效果如下：
+[root@365linux ~]# ls  /net
+[root@365linux ~]# cd  /net/192.168.122.109/
+[root@365linux 192.168.122.109]# ls
+public
+[root@365linux 192.168.122.109]# ls  public/
+demo.txt  ls.txt       root.txt    write.test
+lisi.txt  man_db.conf  wangwu.txt  zhangsan.txt
+[root@365linux 192.168.122.109]# df   -h  |grep net
+192.168.122.109:/public   18G  1.8G   16G   11% /net/192.168.122.109/public
+
+autofs实现的第二种方式，可以自定义挂载点。
+[root@365linux ~]# vim /etc/auto.master
+#/misc  /etc/auto.misc
+/mnt    /etc/auto.misc
+
+[root@365linux ~]# vim  /etc/auto.misc
+nfs             -fstype=nfs             192.168.122.109:/public
+
+ [root@365linux ~]# systemctl   restart   autofs
+
+客户端测试效果：
+[root@365linux ~]# ls /mnt
+[root@365linux ~]# cd   /mnt/nfs
+[root@365linux nfs]# ls
+demo.txt  ls.txt       root.txt    write.test
+lisi.txt  man_db.conf  wangwu.txt  zhangsan.txt
+[root@365linux nfs]# df  -h  |grep  mnt
+192.168.122.109:/public   18G  1.8G   16G   11% /mnt/nfs
+
+
+PS：autofs自动卸载的的超时时间设置：
+[root@xueing nfs]# vim /etc/sysconfig/autofs
+TIMEOUT=300
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+练习：
+1. NFS的共享目录/nfs/public ， 实现所有用户可写，并权限映射到zhangsan.
+2. NFS的共享目录/nfs/data, 实现root用户可写，其他用户只读，并不映射为匿名用户。
+3. 配置客户端使用fstab实现重启后自动挂载nfs共享到/data目录。
+4. 使用autofs实现访问时自动挂载nfs共享到/pub目录。
+
+补充： NFS配置文件的帮助文档
+]# man  exports

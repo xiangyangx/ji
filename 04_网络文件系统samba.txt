@@ -1,0 +1,142 @@
+网络文件系统之二 samba (cifs)
+
+主要是用来linux跟windows之间共享数据，Linux和Linux之间也可以。
+
+装－－》配－－》启－－》测
+
+1. 安装
+
+[root@geust02 ~]# rpm  -qa  |grep  samba
+
+[root@geust02 ~]# yum install  samba
+
+2. 配置
+[root@geust02 ~]# vim /etc/samba/smb.conf
+
+samba共享实例1： 配置一个可匿名访问的共享
+
+security = user
+passdb backend = tdbsam
+map to guest = Bad User
+
+然后再到配置文件的最后添加：
+
+[pub]
+path =  /pub
+public = yes
+
+[root@geust02 ~]# mkdir  /pub
+[root@geust02 ~]# touch   /pub/smb.txt
+
+3. 启动
+
+[root@geust02 ~]# systemctl   start  smb
+
+[root@geust02 ~]# ss  -4ntupl   |grep  smb
+tcp    LISTEN     0      50        *:139                   *:*                   users:(("smbd",pid=1933,fd=38))
+tcp    LISTEN     0      50        *:445                   *:*                   users:(("smbd",pid=1933,fd=37))
+
+4. 测试
+
+客户端
+
+在windows下面访问：在文件浏览器里面，输入\\192.168.122.109
+
+在Linux下，
+1.链接到服务器，输入smb://192.168.122.109
+
+2.在Nautilus的地址栏里面输入smb://192.168.122.109
+
+3.命令行下面访问samba
+
+需要安装 samba-client， cifs-utils
+
+查看
+[root@vhost01 ~]# smbclient -L 192.168.122.109
+
+Sharename       Type      Comment
+	---------       ----      -------
+	pub             Disk
+
+
+挂载
+[root@teacher01 ~]# mount -t cifs //192.168.122.109/pub /mnt
+或者：
+[root@teacher01 ~]# mount  //192.168.122.109/pub /mnt
+
+测试：当前是一个匿名的只读的共享。
+
+配置一个匿名的可读写的共享。
+如果要配制一个可读可写共享，1.在smb的配置文件中打开可写的选项，2.共享目录本身要对客户端用户有可写入的权限。
+
+[pub]
+path =  /pub
+public = yes
+writable = yes
+
+
+[root@geust02 ~]# chmod  777  /pub
+[root@geust02 ~]# systemctl   restart  smb
+
+测试： 在图形界面测试写入文件和文件夹。
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+samba的配置实例2： 基于用户验证的共享
+
+samba用户的帐号系统使用的是系统的帐号，同时需要添加到samba的帐号数据库中。
+
+[pub]
+path =  /pub
+public = no       ＃需要用户验证的共享
+valid users =  zhangsan  +sales     ＃可以访问的用户zhangsan和sales组里的成员
+write list  =  zhangsan     ＃ 只有zhangsan用户可以写入。
+
+可写的选项说明：
+writable = yes  所有可访问的用户都可以写。
+write list = zhangsan  能访问用户中只有zhangsan可以写入。
+两个选项二选一。
+
+
+添加用户：
+[root@geust02 ~]# id  zhangsan
+uid=1001(zhangsan) gid=1001(zhangsan) 组=1001(zhangsan)
+
+[root@geust02 ~]# id  lisi
+uid=2001(lisi) gid=2002(sales) 组=2002(sales)[root@geust02 ~]# id  lisi
+uid=2001(lisi) gid=2002(sales) 组=2002(sales)
+
+[root@geust02 ~]# smbpasswd   -a  zhangsan
+[root@geust02 ~]# smbpasswd   -a  lisi
+
+[root@geust02 ~]# systemctl    restart  smb
+
+添加或修改用户的密码还可以使用pdbedit命令。cifs-utils提供
+
+smb使用的系统的用户，但是使用的用户密码是samba自己管理的密码，而非系统密码（将存在的系统用户添加到samba自己用户认证体系）
+smb的用户和客户端没有关系
+
+
+测试：
+在windows下测试，效果比较明显。Linux可以使用图形界面，也可以命令行。
+
+如果是Linux ， 命令行下面挂载用户验证的samba的方式
+[root@teacher01 ~]# mount -t cifs //192.168.122.74/doc /mnt -o user=zhangsan
+
+补充说明：
+通过用户验证的方式，可以控制某个用户（组）访问指定某个文件夹（不能访问未经许可的文件夹），也可以控制用户对文件夹的写入权限（write list = ）
+
+samba 提供给多个用户可以在指定的共享目录中上传下载文件数据，所以samba常常跟Linux用户管理，权限以及ACL配合使用。
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+练习： 在IPTABLES SELINUX关闭的情况配置samba服务器。
+1. 共享/samba/public目录，支持匿名用户读写共享;
+2. 共享/samba/doc目录，需要用户zhangmin，密码123456登录后，支持读写共享;
+3. 在Linux系统下访问zhangmin用户的家目录（默认已共享，访问时使用smb://192.168.122.109/zhangmin）。
+
+思考：
+
+共享目录/samba/exam, 有如下需要需求:
+1.  user01 用户对exam目录有读写的权限，并可以查看，修改，删除所有用户上传的文件或文件夹；
+2.  user02， user03 用户对exam目录有读写的权限，但只能查看，修改，删除自己的文件或文件夹；
+3.  user04 用户对exam目录有只读的权限，对目录下文件没有任何权限。
+4.  所有用户的密码统一为“123456” （不含双引号）

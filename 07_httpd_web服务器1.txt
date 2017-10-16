@@ -1,0 +1,362 @@
+Apache  httpd 服务器
+
+DNS的配置过程，可以接上一章节，略过
+
+以上是DNS的配置过程，因为网站通常都是通过域名来访问的，而不是IP，所以在实验过程中我们可以配置DNS服务器来配合httpd服务器的实现。
+而在生产环境通常域名解析的工作由域名提供商（或者DNS服务商）来提供解析的功能，一般情况下不需要自行搭建DNS。
+
+另外，在实验环境里面，其实不需要搭建DNS那么复杂，要实现域名到IP的解析访问，用客户端系统/etc/hosts文件即可。
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+apache （httpd）
+httpd是apache开源软件组织（基金会）的众多开源软件中的一款。因为httpd这个网站服务器（web server）的应用之广（全世界市场占有量最大），影响之大，所以，很多时候我们直接用apache称呼该web server。
+还要理解的是，http本身是作为一个协议的名称，而实现该服务器端的软件还有比如nginx , IIS(WINDOWS平台)，lighttpd等等。
+
+应用web服务器之前的准备工作： 配置系统
+－ 静态ip 
+－ selinux开启/关闭（实验环境要求关闭）  
+－ firewalld（实验环境要求关闭）
+－ hostname（唯一标识）   
+－ yum（用来安装软件）   
+－ date （确保服务器时间准确，在真实环境中通常需要ntp时间同步）
+
+以下示例时间同步的配置：
+[root@webserver ~]# vim /etc/crontab
+30 3 *  *  *  * root /usr/sbin/ntpdate  0.rhel.pool.ntp.org
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+应用httpd     装  配 启  测
+
+1.   安装
+
+[root@webserver ~]# yum install httpd 
+
+2.  配置
+
+httpd 默认配置就可以使用
+
+
+3.  启动
+
+[root@webserver ~]# systemctl  start  httpd
+[root@webserver ~]# ss   -ntupl  |grep  httpd
+tcp    LISTEN     0      128      :::80                   :::*                   users:(("httpd",pid=2151,fd=4),("httpd",pid=2150,fd=4),("httpd",pid=2149,fd=4),("httpd",pid=2148,fd=4),("httpd",pid=2147,fd=4),("httpd",pid=2146,fd=4))
+
+http 监听的是80端口。
+
+4. 测试
+
+测试：在真机浏览器访问：http://192.168.122.109/  或者  http://www.upl.net  （dns 或 hosts中解析到192.168.122.109）
+默认情况下，你在浏览器中可以看到一个红帽测试页面（在没有首页时出现）。
+
+
+
+在命令行中测试：
+[root@test_client01 ~]# elinks -dump http://192.168.122.109
+                       Red Hat Enterprise Linux Test Page
+还可以使用w3m lynx命令行工具测试。
+
+5. 补充
+[root@webserver ~]# cd  /etc/httpd/
+[root@webserver httpd]# ls
+conf  conf.d  conf.modules.d  logs  modules  run
+
+httpd的工作路径为/etc/httpd， 
+
+conf/httpd.conf     主配置文件，需要详细了解
+conf.d              扩展配置文件目录
+conf.modules.d      模块加载配置文件目录
+logs                日志目录，软链接到 /var/log/httpd
+modules             模块目录，软链接到 /usr/lib64/httpd/modules
+run                 进程目录，软链接到 /run/httpd
+
+建议修改/etc/httpd/conf/httpd.conf  中：
+
+ServerName www.upl.net:80   # 已知服务器的域名为www.upl.net
+或者
+ServerName 0.0.0.0:80       # 没有或有多个域名写ip
+
+
+－－－－－－－－－－－－－－－httpd 应用实例 1 ：  修改web的默认主页－－－－－－－－－－－－－－－－－－－
+
+
+默认的网站根目录（放网页的地方）
+[root@webserver ~]# vim /var/www/html/index.html
+<html>
+<body>
+<h1>shangguan test page 001</h1>
+</body>
+</html>
+
+测试：
+[root@test_client ~]# elinks -dump www.upl.net
+                              shangguan test page 001
+
+
+－－－－－－－－－－httpd 应用实例 2 ：  修改web的默认主页－－－－－－－－－－－－－－－－－
+
+http协议是一个明文的传输，所以在一些敏感的数据或操作（比如登录，支付）时，需要进行传输加密。https协议就是通过ssl进行双向加密传输 。
+
+配置https ：
+[root@webserver httpd]# yum install  mod_ssl
+
+实现https的三种方式：
+1.  使用软件自带的key 和 crt
+2. 使用自签名的crt
+3. 使用权威的CA机构颁发的crt
+
+详细如下：
+1.  使用软件自带的key 和 crt
+
+[root@webserver ~]# ls /etc/httpd/conf.d/
+ssl.conf
+
+[root@webserver ~]# vim /etc/httpd/conf.d/ssl.conf
+以下是红帽提供的默认的证书和密钥在配置文件中的引用。
+SSLCertificateFile /etc/pki/tls/certs/localhost.crt
+SSLCertificateKeyFile /etc/pki/tls/private/localhost.key
+
+
+[root@webserver httpd]# systemctl    restart  httpd
+
+默认使用redhat自带认证证书进行加密，当然这个证书是不被浏览器信任的。
+
+客户端浏览器访问测试：
+https：//www.upl.net
+会不信任，访问时需要浏览器添加例外。
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+2. 使用自签名的crt （自己生成key，自己给自己签名颁发证书）
+
+方式 1 ： 不推荐，慢。在询问是否生存csr时选NO
+[root@webserver ~]# yum install crypto-utils
+[root@webserver ~]# genkey --days 365 www.upl.net
+
+方式2 ： 
+[root@webserver ~]# openssl req -new -x509 -nodes -out web.crt -keyout web.key
+需要填写的部分：
+Country Name (2 letter code) [XX]:CN
+State or Province Name (full name) []:Guangdong
+Locality Name (eg, city) [Default City]:Guangzhou
+Organization Name (eg, company) [Default Company Ltd]:Shangguan
+Organizational Unit Name (eg, section) []:tech
+Common Name (eg, your name or your server's hostname) []:www.upl.net
+Email Address []:123456@qq.com
+
+[root@webserver ~]# ls web*
+web.crt  web.key
+
+[root@webserver ~]# mkdir  /etc/httpd/ssl
+
+[root@webserver ~]# cp  web.crt  web.key    /etc/httpd/ssl/
+
+[root@webserver ~]# vim /etc/httpd/conf.d/ssl.conf
+
+SSLCertificateFile /etc/httpd/ssl/web.crt
+
+SSLCertificateKeyFile /etc/httpd/ssl/web.key
+
+
+root@webserver ~]# systemctl    restart  httpd
+
+在客户端浏览器中访问：
+https://www.upl.net/
+
+查看证书信息。
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+3. 使用权威的CA机构颁发的crt  （当然这里是模拟CA）
+
+192.168.122.109    webserver
+192.168.122.101    ca机构
+192.168.122.1           客户端
+
+第1步： web服务器生成加密的key
+[root@webserver ssl]# openssl   genrsa   -out  server.key   2048
+
+第2步： web服务器生成签名请求csr
+[root@webserver ssl]# openssl  req   -new  -key  server.key  -out  server.csr
+需要填写的部分：
+Country Name (2 letter code) [XX]:CN
+State or Province Name (full name) []:Guangdong
+Locality Name (eg, city) [Default City]:Guangzhou
+Organization Name (eg, company) [Default Company Ltd]:Uplooking
+Organizational Unit Name (eg, section) []:System
+Common Name (eg, your name or your server's hostname) []:www.upl.net
+Email Address []:23456@qq.com
+
+第3步： 在CA服务器上建立用于签名的环境
+[root@ca ~]# /etc/pki/tls/misc/CA   -newca 
+CA certificate filename (or enter to create)
+
+Making CA certificate ...
+Generating a 2048 bit RSA private key
+...+++
+..............................+++
+writing new private key to '/etc/pki/CA/private/./cakey.pem'
+Enter PEM pass phrase:  需要设密码
+Verifying - Enter PEM pass phrase:  重复密码
+-----
+You are about to be asked to enter information that will be incorporated
+into your certificate request.
+What you are about to enter is what is called a Distinguished Name or a DN.
+There are quite a few fields but you can leave some blank
+For some fields there will be a default value,
+If you enter '.', the field will be left blank.
+-----
+Country Name (2 letter code) [XX]:US
+State or Province Name (full name) []:JZ
+Locality Name (eg, city) [Default City]:XY
+Organization Name (eg, company) [Default Company Ltd]:google
+Organizational Unit Name (eg, section) []:tech
+Common Name (eg, your name or your server's hostname) []:www.google.com
+Email Address []:654321@gmail.com
+
+Please enter the following 'extra' attributes
+to be sent with your certificate request
+A challenge password []:    不需要设密码
+An optional company name []:   直接回车
+Using configuration from /etc/pki/tls/openssl.cnf
+Enter pass phrase for /etc/pki/CA/private/./cakey.pem: 输入cakey.pem的密码
+Check that the request matches the signature
+Signature ok
+
+....... 中间输出略
+
+Write out database with 1 new entries
+Data Base Updated
+
+第4步： 把webserver上的csr签名请求文件发送给CA到其签名目录
+[root@webserver ssl]# scp   server.csr    192.168.122.101:/etc/pki/tls/misc/CA/
+
+
+第5步： CA对csr文件进行签名
+[root@ca CA]# mv  server.csr  newreq.pem
+[root@ca CA]# /etc/pki/tls/misc/CA -sign 
+Using configuration from /etc/pki/tls/openssl.cnf
+Enter pass phrase for /etc/pki/CA/private/cakey.pem:  输入cakey.pem的密码 
+Check that the request matches the signature
+Signature ok
+....... 中间输出略
+Sign the certificate? [y/n]:y
+....... 中间输出略
+1 out of 1 certificate requests certified, commit? [y/n]y
+
+第6步： 把新的签名好的证书回传给webserver
+[root@ca CA]# scp   newcert.pem    192.168.122.109:/root/ssl/
+
+[root@webserver ssl]# mv  newcert.pem server.crt
+[root@webserver ssl]# ls
+
+server.crt  server.csr  server.key
+
+[root@webserver ssl]# mv  server.key  server.crt   /etc/httpd/
+
+第7步： 在ssl.conf中引用即可。
+
+思考： 如何做到用户输入http://www.shangguan.com 会自动跳转到https://www.shangguan.com
+
+－－－－－－－－－－－－http应用实例3：配置基于域名的虚拟主机－－－－－－－－－－－－－
+
+虚拟主机可以使一台httpd的服务器能够运行多个独立的网站。
+多个独立的网站可以基于不同域名，基于不同IP，基于不同的端口。
+最常用的基于域名的虚拟主机。
+
+DNS：接上节课，我们已经做两个域名解析到同一IP，分别是www.shangguan.com   www.lovelinux.com
+
+PS: 如果你DNS没做成功，那么可以在客户端的/etc/hosts文件添加：
+192.168.122.200    www.shangguan.com  www.lovelinux.com 
+
+[root@webserver httpd]# vim  conf.d/vhost.conf
+
+NameVirtualHost *:80
+<VirtualHost *:80>
+    ServerAdmin webmaster@163.com
+    DocumentRoot /www/shangguan
+    ServerName www.shangguan.com
+    ErrorLog  logs/www.shangguan.com-error_log
+    CustomLog  logs/www.shangguan.com-access_log common
+</VirtualHost>
+
+<VirtualHost *:80>
+    DocumentRoot /www/lovelinux
+    ServerName   www.lovelinux.com
+    ErrorLog   logs/www.lovelinux.com-error_log
+    CustomLog  logs/www.lovelinux.com-access_log common
+</VirtualHost>
+
+默认情况下，httpd在主配置文件中禁止访问网站的默认根目录，导致虚拟主机主页无权限访问，如下：
+<Directory />
+    AllowOverride none
+    Require all denied
+</Directory>
+
+解决的方案是：
+1. 将主配置文件针对<Directory />的权限改为Require all granted， 对所有虚拟主机生效。
+或者：
+2. 在保持<Directory />的权限为Require all denied不变的情况下，为每个虚拟主机的家目录添加授权，如下：
+
+NameVirtualHost *:80
+<VirtualHost *:80>
+    ServerAdmin webmaster@163.com
+    DocumentRoot /www/shangguan
+    <Directory  /www/shangguan>
+          Require all granted
+    </Directory>
+    ServerName www.shangguan.com
+    ErrorLog  logs/www.shangguan.com-error_log
+    CustomLog  logs/www.shangguan.com-access_log common
+</VirtualHost>
+
+<VirtualHost *:80>
+    DocumentRoot /www/lovelinux
+    <Directory  /www/lovelinux>
+          Require all granted
+    </Directory>
+    ServerName   www.lovelinux.com
+    ErrorLog   logs/www.lovelinux.com-error_log
+    CustomLog  logs/www.lovelinux.com-access_log common
+</VirtualHost>
+
+创建网站根目录：
+[root@webserver ~]# mkdir   -p   /www/{shangguan,lovelinux}
+[root@webserver ~]# ls  /www/
+lovelinux  shangguan
+
+建立两个网站首页：
+[root@webserver ~]# echo "test   shangguan" > /www/shangguan/index.html
+[root@webserver ~]# echo "test   lovelinux" > /www/lovelinux/index.html
+
+在客户端浏览器中分别访问：
+www.shangguan.com
+www.lovelinux.com
+得到两个不同内容的首页页面。
+
+在浏览器中用ip“192.168.122.109”或者之前www.upl.net访问，会得www.shangguan.com的页面。
+
+就是说，当开启了虚拟主机之后，原来默认的网站（/var/www/html）就失效了。第一个虚拟主机变成现在默认的网站。
+
+这里演示的是最常用的基于域名的虚拟主机配置。 
+
+还有不常用的：　
+１　基于ＩＰ的虚拟主机。
+２　基于端口的虚拟主机。
+
+思考：如何在虚拟主机中使用https  （参考ssl.conf）
+
+－－－－－－－－－－－－－－－－－－－－－－－练习 －－－－－－－－－－－－－－－－－－－－－－－－－－－－
+练习： 
+
+以下https均采用自签名证书：
+1.  安装httpd, 创建网站首页内容为“This is my test page”， 支持https访问;
+2.  配置httpd的运行用户和组为www; 
+3.  通过命令行工具从客户端访问httpd， 观察访问日志的增加； 
+4.  创建两个基于域名的虚拟主机，分别是www.upl01.com  www.upl02.com , 首页内容不同； 
+  
+
+进阶： 
+1. 虚拟主机www.upl01.com 支持https协议访问；
+2. 访问http://www.upl01.com 时， 自动跳转到https。 
+
+

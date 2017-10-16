@@ -1,0 +1,281 @@
+DNS 域名解析服务器
+
+原理部分查看ppt
+ 
+1.装
+
+ [root@geust02 ~]# yum  install   -y   bind   bind-chroot  bind-utils
+
+2. 配
+
+默认配置文件，bind能够提供本地（本机127.0.0.1）dns的解析服务，并仅提供缓存功能。
+
+3. 启
+[root@geust02 ~]# rndc-confgen -a -r /dev/urandom
+wrote key file "/etc/rndc.key"
+
+[root@geust02 ~]# systemctl   start  named
+
+[root@geust02 ~]# ss  -4ntupl  |grep   named
+udp    UNCONN     0      0      127.0.0.1:53                    *:*                   users:(("named",pid=1602,fd=513),("named",pid=1602,fd=512))
+tcp    LISTEN     0      10     127.0.0.1:53                    *:*                   users:(("named",pid=1602,fd=20))
+
+
+如果要使用安全的chroot方式， 
+ systemctl   start   named-chroot
+在配置时所有的文件和目录都要基于/var/named/chroot 目录为根目录。
+比如要修改配置文件/etc/named.conf  ，在chroot模式就要修改/var/named/chroot/etc/named.conf  
+
+3. 测
+目前named服务监听的是127.0.0.1：53 ， 那么只能在本机测试。
+
+[root@geust02 ~]# vim  /etc/resolv.conf
+nameserver   127.0.0.1
+
+
+[root@geust02 ~]# nslookup     www.365linux.com
+Server:		127.0.0.1
+Address:	127.0.0.1#53
+
+Non-authoritative answer:
+Name:	www.365linux.com
+Address: 103.242.133.231
+第一次解析这个域名的IP时， 它要去根域进行递归查询，所以比较久的时间
+
+[root@geust02 ~]# nslookup     www.365linux.com
+Server:		127.0.0.1
+Address:	127.0.0.1#53
+
+Non-authoritative answer:
+Name:	www.365linux.com
+Address: 103.242.133.231
+第二次查询的时候，由于已经建立了缓存，速度很快。
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+
+DNS应用实例 1 ：  能够提供其他主机查询服务
+
+
+[root@geust02 ~]# vim /etc/named.conf
+
+listen-on port 53 { any; };   也可以写一个或多个对外ip地址，用；号隔开。
+#listen-on-v6 port 53 { ::1; };   注释掉或者写 {  none; }; 禁止监听ipv6
+
+allow-query     { any; };   也可以写成一个或多个指定的网段； 
+
+zone "." IN {
+        type hint;
+        file "named.ca";
+};
+
+在进行递归查询的时候，根据named.ca文件中IP地址找到根域服务器。
+
+[root@geust02 ~]# systemctl   reload   named
+[root@geust02 ~]# ss  -4ntupl  |grep named
+udp    UNCONN     0      0      192.168.122.109:53                    *:*                   users:(("named",pid=1806,fd=515),("named",pid=1806,fd=514))
+udp    UNCONN     0      0      127.0.0.1:53                    *:*                   users:(("named",pid=1806,fd=513),("named",pid=1806,fd=512))
+tcp    LISTEN     0      10     192.168.122.109:53                    *:*                   users:(("named",pid=1806,fd=21))
+tcp    LISTEN     0      10     127.0.0.1:53                    *:*                   users:(("named",pid=1806,fd=20))
+
+
+客户端测试：
+
+[root@365linux ~]# vim /etc/resolv.conf
+ nameserver 192.168.122.109
+
+
+[root@365linux ~]# nslookup   www.365linux.com
+Server:		192.168.122.109
+Address:	192.168.122.109#53
+
+Non-authoritative answer:    非权威的回答，为什么？
+Name:	www.365linux.com
+Address: 103.242.133.231
+
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+DNS应用实例 2 ：   配置一个有自己数据库权威的DNS服务器
+
+正向解析（域名  －－> IP）
+反向解析 （IP  －－> 域名）
+
+绝大多数情况下只需要正向解析。
+
+配置过程可以参考以下目录当中的示例文件：
+[root@geust02 ~]# ls -R   /usr/share/doc/bind-9.9.4/sample/
+
+[root@geust02 ~]# vim /etc/named.conf
+
+在最后添加：
+
+zone  "upl.net" IN  {
+        type  master;
+        file  "upl.net.db";
+};
+
+
+[root@geust02 ~]# cd /var/named
+
+[root@geust02 named]# cp    /usr/share/doc/bind-9.9.4/sample/var/named/my.internal.zone.db     ./upl.net.db
+
+[root@geust02 named]# vim  upl.net.db
+
+@ in soa localhost. root 1 3H 15M 1W 1D
+  ns localhost.
+www      A    192.168.122.110
+www      A    192.168.122.119
+ftp      A    192.168.122.111
+bbs      A    192.168.122.112
+news     CNAME  www
+
+[root@geust02 named]# chmod   640   upl.net.db 
+[root@geust02 named]# chgrp   named  upl.net.db
+
+[root@geust02 named]# systemctl  reload   named
+
+客户端测试：
+
+[root@365linux ~]# nslookup www.upl.net
+Server:		192.168.122.109
+Address:	192.168.122.109#53
+
+Name:	www.upl.net
+Address: 192.168.122.110
+Name:	www.upl.net
+Address: 192.168.122.119
+
+[root@365linux ~]# nslookup   ftp.upl.net
+Server:		192.168.122.109
+Address:	192.168.122.109#53
+
+Name:	ftp.upl.net
+Address: 192.168.122.111
+
+[root@365linux ~]# nslookup  news.upl.net
+Server:		192.168.122.109
+Address:	192.168.122.109#53
+
+news.upl.net	canonical name = www.upl.net.
+Name:	www.upl.net
+Address: 192.168.122.119
+Name:	www.upl.net
+Address: 192.168.122.110
+
+--------------------------------------------------------------------------------------------------------------------------------
+
+DNS应用实例 3 ： 配置dns反向解析
+
+在邮件服务里面要用到反向解析进行邮箱地址的合法性验证。
+
+
+zone "122.168.192.in-addr.arpa" IN {
+         type master;
+         file "upl.net.rev.db";
+        };
+
+
+[root@geust02 named]# cp  -a    upl.net.db   upl.net.rev.db
+
+[root@geust02 named]# vim  upl.net.rev.db 
+
+@ in soa localhost. root 1 3H 15M 1W 1D
+  ns localhost.
+110      PTR   www.upl.net.
+119      PTR   www.upl.net.
+111      PTR   ftp.upl.net.
+112      PTR   bbs.upl.net.
+110      PTR   news.upl.net.
+119      PTR   news.upl.net.
+
+[root@geust02 named]# systemctl   reload   named
+
+客户端测试：
+[root@365linux ~]# nslookup    192.168.122.110
+Server:		192.168.122.109
+Address:	192.168.122.109#53
+
+110.122.168.192.in-addr.arpa	name = www.upl.net.
+110.122.168.192.in-addr.arpa	name = news.upl.net.
+
+[root@365linux ~]# nslookup    192.168.122.111
+Server:		192.168.122.109
+Address:	192.168.122.109#53
+
+111.122.168.192.in-addr.arpa	name = ftp.upl.net.
+
+－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－
+补充： 了解
+
+正解数据库的另外一种授权给指定服务器（而不是本机）的写法：
+[root@vhost named]# vim cyrhce.com.zone
+$TTL 1D
+@       IN SOA  dns.cyrhce.com. root.cyrhce.com. (     //说明： root.cyrhce.com. 实际是 root@cyrhce.com的邮箱
+                                        0       ; serial
+                                        1D      ; refresh
+                                        1H      ; retry
+                                        1W      ; expire
+                                        3H )    ; minimum
+@       NS      dns.cyrhce.com.
+dns     IN A    192.168.1.211
+www     IN A    192.168.1.75
+www     IN A    192.168.1.76
+www     IN A    192.168.1.77
+ftp     IN A    192.168.1.102
+bbs     IN A    192.168.1.103
+@       IN MX 10 mail.cyrhce.com.
+mail    IN A    192.168.1.104
+blog    IN CNAME  www
+*       IN CNAME  bbs
+＠       IN  A    192.168.1.80
+
+PS :  MX表示邮件解析记录； ＊表示泛解析；＠表示无主机名的直接解析。  解析条目中的IN可以省略不写。
+
+练习：
+1.完成上述到课堂实例。
+（要求：缓存，正解，反解）
+
+2. 要求，
+DNS服务器的IP为192.168.122.199/24
+要完成两个域名， www.shangguan.com    www.lovelinux.com 正解和反解。
+两个域名都解析到你另一个存在的虚拟机的IP，IP指定为192.168.122.200/24 
+（虚拟机的网络连接为default NAT）
+
+3. 自学思考：
+dns 服务器在没有自身数据库查询的情况下，将请求转发(forward)给另外一个dns服务器。 理解条件转发(forward first)和直接转发(forward only)
+
+4. 进阶思考：
+DNS服务器的IP有两个  192.168.122.199/24 ；   192.168.10.199/24
+针对www.linuxshare.com 域名提供解析：
+当客户端从122网段访问dns时，解析到192.168.122.200 
+当客户端从10网段访问dns时， 解析到192.168.10.200
+提示 view
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
